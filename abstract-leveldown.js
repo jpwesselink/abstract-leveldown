@@ -4,6 +4,41 @@ var xtend                = require('xtend')
   , AbstractIterator     = require('./abstract-iterator')
   , AbstractChainedBatch = require('./abstract-chained-batch')
 
+function trackCallback(db, callback) {
+  if (typeof callback != 'function')
+    return callback
+
+  db.__activeIterators++
+
+  return function finishCallback() {
+    callback.apply(db, arguments)
+
+    if (--db.__activeIterators === 0 && typeof db.__destroyFunction == 'function')
+      db.__destroyFunction()
+  }
+}
+
+function destroy(db, callback) {
+  return function destroyFunction () {
+    var oldStatus = this.status
+
+    if (typeof db._close == 'function') {
+      db.status = 'closing'
+      db._close(function (err) {
+        if (err) {
+          db.status = oldStatus
+          return callback(err)
+        }
+        db.status = 'closed'
+        callback()
+      })
+    } else {
+      db.status = 'closed'
+      process.nextTick(callback)
+    }
+  }
+}
+
 function AbstractLevelDOWN (location) {
   if (!arguments.length || location === undefined)
     throw new Error('constructor requires at least a location argument')
@@ -13,6 +48,7 @@ function AbstractLevelDOWN (location) {
 
   this.location = location
   this.status = 'new'
+  this.__activeIterators = 0
 }
 
 AbstractLevelDOWN.prototype.open = function (options, callback) {
@@ -24,6 +60,8 @@ AbstractLevelDOWN.prototype.open = function (options, callback) {
 
   if (typeof callback != 'function')
     throw new Error('open() requires a callback argument')
+
+  callback = trackCallback(this, callback)
 
   if (typeof options != 'object')
     options = {}
@@ -49,24 +87,16 @@ AbstractLevelDOWN.prototype.open = function (options, callback) {
 
 AbstractLevelDOWN.prototype.close = function (callback) {
   var self      = this
-    , oldStatus = this.status
 
   if (typeof callback != 'function')
     throw new Error('close() requires a callback argument')
 
-  if (typeof this._close == 'function') {
-    this.status = 'closing'
-    this._close(function (err) {
-      if (err) {
-        self.status = oldStatus
-        return callback(err)
-      }
-      self.status = 'closed'
-      callback()
-    })
+  var destroyFunction = destroy(this, callback)
+
+  if (this.__activeIterators > 0) {
+      this.__destroyFunction = destroyFunction
   } else {
-    this.status = 'closed'
-    process.nextTick(callback)
+    destroyFunction()
   }
 }
 
@@ -87,6 +117,8 @@ AbstractLevelDOWN.prototype.get = function (key, options, callback) {
   if (typeof options != 'object')
     options = {}
 
+  callback = trackCallback(this, callback)
+
   options.asBuffer = options.asBuffer != false
 
   if (typeof this._get == 'function')
@@ -106,6 +138,8 @@ AbstractLevelDOWN.prototype.put = function (key, value, options, callback) {
 
   if (err = this._checkKey(key, 'key'))
     return callback(err)
+
+  callback = trackCallback(this, callback)
 
   key = this._serializeKey(key)
   value = this._serializeValue(value)
@@ -136,6 +170,8 @@ AbstractLevelDOWN.prototype.del = function (key, options, callback) {
   if (typeof options != 'object')
     options = {}
 
+  callback = trackCallback(this, callback)
+
   if (typeof this._del == 'function')
     return this._del(key, options, callback)
 
@@ -160,6 +196,8 @@ AbstractLevelDOWN.prototype.batch = function (array, options, callback) {
 
   if (!options || typeof options != 'object')
     options = {}
+
+  callback = trackCallback(this, callback)
 
   var i = 0
     , l = array.length
