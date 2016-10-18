@@ -20,7 +20,7 @@ function trackCallback(db, callback) {
 
 function closeWhenDone(db, callback) {
   return function closeWhenDoneFunction () {
-    var oldStatus = this.status
+    var oldStatus = db.status
 
     if (typeof db._close == 'function') {
       db.status = 'closing'
