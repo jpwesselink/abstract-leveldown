@@ -13,13 +13,13 @@ function trackCallback(db, callback) {
   return function finishCallback() {
     callback.apply(db, arguments)
 
-    if (--db.__activeIterators === 0 && typeof db.__destroyFunction == 'function')
-      db.__destroyFunction()
+    if (--db.__activeIterators === 0 && typeof db.__closeWhenDoneFunction == 'function')
+      db.__closeWhenDoneFunction()
   }
 }
 
-function destroy(db, callback) {
-  return function destroyFunction () {
+function closeWhenDone(db, callback) {
+  return function closeWhenDoneFunction () {
     var oldStatus = this.status
 
     if (typeof db._close == 'function') {
@@ -91,12 +91,12 @@ AbstractLevelDOWN.prototype.close = function (callback) {
   if (typeof callback != 'function')
     throw new Error('close() requires a callback argument')
 
-  var destroyFunction = destroy(this, callback)
+  var closeWhenDoneFunction = closeWhenDone(this, callback)
 
   if (this.__activeIterators > 0) {
-      this.__destroyFunction = destroyFunction
+      this.__closeWhenDoneFunction = closeWhenDoneFunction
   } else {
-    destroyFunction()
+    closeWhenDoneFunction()
   }
 }
 
